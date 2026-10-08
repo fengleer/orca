@@ -1,4 +1,7 @@
-import { formatDeepSeekBalance } from '../../../../shared/deepseek-balance'
+import {
+  formatDeepSeekBalance,
+  formatDeepSeekUsd
+} from '../../../../shared/deepseek-balance'
 import { AlertTriangle } from 'lucide-react'
 import React from 'react'
 import type { ProviderRateLimits, RateLimitWindow } from '../../../../shared/rate-limit-types'
@@ -281,15 +284,27 @@ export function ProviderSegment({
   display: UsagePercentageDisplay
   mode?: StatusBarUsageMode
 }): React.JSX.Element {
-  if (p?.provider === 'deepseek' && p.balance) {
-    return (
-      <span className="inline-flex items-center gap-1.5 tabular-nums">
-        <ProviderIcon provider="deepseek" />
-        {formatDeepSeekBalance(p.balance) ||
-          translate('deepseek.balance.pending', 'Balance unavailable')}
-        {p.status === 'error' || !p.balance.is_available ? <AlertTriangle size={11} /> : null}
-      </span>
-    )
+  if (p?.provider === 'deepseek') {
+    const balanceText = p.balance ? formatDeepSeekBalance(p.balance) : null
+    // Why the amount and not a percentage: DeepSeek bills per token with no allowance to
+    // measure against, so the number the operator wants is today's cost, not a ratio.
+    const spendText = p.dailySpend
+      ? translate('deepseek.spend.todayInline', 'Today {{amount}}', {
+          amount: formatDeepSeekUsd(p.dailySpend.costUsd)
+        })
+      : null
+    if (balanceText || spendText) {
+      return (
+        <span className="inline-flex items-center gap-1.5 tabular-nums">
+          <ProviderIcon provider="deepseek" />
+          {balanceText || translate('deepseek.balance.pending', 'Balance unavailable')}
+          {spendText ? <span className="text-muted-foreground">{spendText}</span> : null}
+          {p.status === 'error' || (p.balance && !p.balance.is_available) ? (
+            <AlertTriangle size={11} />
+          ) : null}
+        </span>
+      )
+    }
   }
   const provider = p?.provider ?? 'claude'
   const statusLabel = p ? getProviderUsageStatusLabel(p) : ''

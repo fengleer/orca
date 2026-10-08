@@ -1,8 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useDeepSeekAccount } from '@/hooks/useDeepSeekAccount'
-import { getDeepSeekAccountScope } from '@/runtime/deepseek-account-scope'
-import { refreshDeepSeekAccount } from '@/runtime/deepseek-account-client'
-import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
 import { useAppStore } from '../../store'
 import { selectFloatingWorkspaceHasUnread } from '../../store/selectors'
@@ -14,19 +10,14 @@ import { getVisibleUsageProvider, isUsageEmptyState } from './status-bar-provide
 import { getUsageProviderAccountsSectionId } from './usage-provider-settings-target'
 import { CLOSE_ALL_CONTEXT_MENUS_EVENT, useStatusBarMenuFocusHandoff } from './ProviderDetailsMenu'
 import { useStatusBarDensity } from './status-bar-density'
+import { useStatusBarDeepSeekAccount } from './use-status-bar-deepseek'
 
 export function useStatusBarController(floatingTerminalOpen: boolean) {
   const floatingTerminalShortcut = useShortcutLabel('floatingTerminal.toggle')
   const rateLimits = useAppStore((s) => s.rateLimits)
   const settings = useAppStore((s) => s.settings)
-  const activeWorkspaceHostId = useAppStore((s) => s.activeWorkspaceExecutionHostId)
-  const deepseekScope = getDeepSeekAccountScope(
-    settings,
-    activeWorkspaceHostId,
-    getRendererAppPlatform()
-  )
-  const deepseekState = useDeepSeekAccount(deepseekScope.environmentId, deepseekScope.unsupported)
-  const { account: deepseekAccount, limits: deepseek } = deepseekState
+  const deepseekAccount = useStatusBarDeepSeekAccount()
+  const refreshDeepSeekAccount = deepseekAccount.refresh
   const refreshRateLimits = useAppStore((s) => s.refreshRateLimits)
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
@@ -91,26 +82,17 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     setIsRefreshing(true)
     try {
       // Why: re-run PATH detection so a freshly-installed/removed CLI's bar appears/hides without restarting Orca.
-      const deepseekRefresh =
-        deepseekAccount?.supported && deepseekAccount.ownerId && deepseekScope.environmentId
-          ? refreshDeepSeekAccount(
-              { kind: 'environment', environmentId: deepseekScope.environmentId },
-              deepseekAccount.ownerId
-            )
-          : Promise.resolve()
-      await Promise.all([refreshRateLimits(), refreshDetectedAgents(), deepseekRefresh])
+      await Promise.all([
+        refreshRateLimits(),
+        refreshDetectedAgents(),
+        refreshDeepSeekAccount()
+      ])
     } finally {
       if (mountedRef.current) {
         setIsRefreshing(false)
       }
     }
-  }, [
-    isRefreshing,
-    refreshRateLimits,
-    refreshDetectedAgents,
-    deepseekAccount,
-    deepseekScope.environmentId
-  ])
+  }, [isRefreshing, refreshRateLimits, refreshDetectedAgents, refreshDeepSeekAccount])
 
   if (!statusBarVisible) {
     return null
@@ -134,7 +116,8 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     grokAuthConfigured: rateLimits.grokAuthConfigured,
     cursorAuthConfigured: rateLimits.cursorAuthConfigured,
     zcodePlanApiKeyConfigured: rateLimits.zcodePlanApiKeyConfigured,
-    deepseekApiKeyConfigured: deepseekAccount?.supported === true && deepseekAccount.configured
+    deepseekApiKeyConfigured:
+      deepseekAccount.account?.supported === true && deepseekAccount.account.configured
   }
   const visibleClaude = getVisibleUsageProvider('claude', claude, usageSettings)
   const visibleCodex = getVisibleUsageProvider('codex', codex, usageSettings)
@@ -145,7 +128,7 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
   const visibleGrok = getVisibleUsageProvider('grok', grok, usageSettings)
   const visibleCursor = getVisibleUsageProvider('cursor', cursor, usageSettings)
   const visibleZcode = getVisibleUsageProvider('zcode', zcode, usageSettings)
-  const visibleDeepSeek = getVisibleUsageProvider('deepseek', deepseek, usageSettings)
+  const visibleDeepSeek = getVisibleUsageProvider('deepseek', deepseekAccount.limits, usageSettings)
   const showDeepSeek = visibleDeepSeek !== null && statusBarItems.includes('deepseek')
   const showClaude =
     visibleClaude !== null &&
@@ -217,7 +200,7 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
       grok,
       cursor,
       zcode,
-      deepseek
+      deepseek: deepseekAccount.limits
     },
     usageSettings
   )

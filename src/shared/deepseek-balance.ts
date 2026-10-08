@@ -21,6 +21,34 @@ export const DeepSeekBalanceResponse = z
 
 export type DeepSeekBalance = z.infer<typeof DeepSeekBalanceResponse>
 
+/**
+ * Today's DeepSeek spend, derived locally from the DSH session ledger. DeepSeek has no
+ * billing API, so the harness's own per-request usage records are the only honest source.
+ */
+export type DeepSeekDailySpend = {
+  /** Local day the numbers cover, 'YYYY-MM-DD'. */
+  dayKey: string
+  requests: number
+  cacheHitTokens: number
+  cacheMissTokens: number
+  outputTokens: number
+  costUsd: number
+  /** Operator-set daily budget in USD; null when unset, which suppresses the percentage. */
+  budgetUsd: number | null
+  usedPercent: number | null
+  /** Next local midnight, unix ms. */
+  resetsAt: number
+}
+
+/**
+ * Why this module owns the formatter: `shared/currency-format.ts` landed on main after the base
+ * this stack builds on, and the spend rows have to render on both. DeepSeek bills in USD here,
+ * so a fixed two-decimal dollar string is the whole requirement.
+ */
+export function formatDeepSeekUsd(amount: number): string {
+  return `$${(Number.isFinite(amount) ? amount : 0).toFixed(2)}`
+}
+
 export type DeepSeekAccountStatus = {
   supported: boolean
   configured: boolean

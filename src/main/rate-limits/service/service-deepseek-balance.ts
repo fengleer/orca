@@ -1,14 +1,36 @@
 import type { DeepSeekCredentials } from '../../deepseek/deepseek-credentials'
+import { resolveDeepSeekFallbackApiKey } from '../../deepseek/deepseek-api-key-source'
+import { DeepSeekDailySpendReader } from '../../deepseek/deepseek-daily-spend'
 import { unsupportedDeepSeekAccount } from '../../../shared/deepseek-balance'
+import type { DeepSeekDailySpend } from '../../../shared/deepseek-balance'
 import { deepSeekBalanceFailure, fetchDeepSeekBalance } from '../deepseek-fetcher'
 import { RateLimitServiceFetchPolicy } from './service-fetch-policy'
-import type { RateLimitState } from './service-types'
+import type { ProviderRateLimits, RateLimitState } from './service-types'
 
 export abstract class RateLimitServiceDeepSeekBalance extends RateLimitServiceFetchPolicy {
   protected deepseekCredentials: DeepSeekCredentials | null = null
   private deepseekGeneration = 0
   private deepseekFetch: Promise<RateLimitState> | null = null
   private deepseekRevision: string | null | undefined
+  private deepseekDailySpendReader: DeepSeekDailySpendReader | null = null
+
+  /** Overridable so tests can point the spend ledger at a fixture sessions root. */
+  protected createDeepSeekDailySpendReader(): DeepSeekDailySpendReader {
+    return new DeepSeekDailySpendReader()
+  }
+
+  /**
+   * Why it never rejects: today's spend is local bookkeeping that must survive a balance
+   * fetch failure — the segment shows the cost even while the prepaid balance is stale.
+   */
+  private async readDeepSeekDailySpend(): Promise<DeepSeekDailySpend | null> {
+    this.deepseekDailySpendReader ??= this.createDeepSeekDailySpendReader()
+    try {
+      return await this.deepseekDailySpendReader.read()
+    } catch {
+      return null
+    }
+  }
 
   setDeepSeekCredentials(credentials: DeepSeekCredentials): void {
     if (this.deepseekCredentials) {
@@ -105,23 +127,31 @@ export abstract class RateLimitServiceDeepSeekBalance extends RateLimitServiceFe
       this.deepseekRevision = revision
       this.updateState({ ...this.state, deepseek: null })
     }
-    let fresh = deepSeekBalanceFailure(
-      'DeepSeek accounts are unsupported on this host',
-      'usage-unavailable',
-      'unavailable'
-    )
-    if (credentials && !credentials.getStatus(false).configured) {
-      fresh = await fetchDeepSeekBalance(null, signal)
-    } else if (credentials?.getStatus().supported) {
+    // Why the sealed store wins: when it holds a key, that is the key the user configured
+    // in Orca. The env/DSH fallbacks exist for hosts where OS encryption is unavailable.
+    const sealedUsable =
+      credentials?.getStatus(false).configured === true && credentials.getStatus().supported
+    let apiKey: string | null = null
+    let credentialError: string | null = null
+    if (sealedUsable) {
       try {
-        fresh = await fetchDeepSeekBalance(credentials.read(), signal)
+        apiKey = credentials.read()
       } catch {
-        fresh = deepSeekBalanceFailure(
-          'DeepSeek API key could not be read from protected storage',
-          'keychain-unavailable'
-        )
+        credentialError = 'DeepSeek API key could not be read from protected storage'
       }
+    } else {
+      apiKey = resolveDeepSeekFallbackApiKey().apiKey
     }
+    // Why the scan waits for a key: with no DeepSeek account on this host there is nothing to
+    // account for, and walking the whole harness ledger per cycle is real work — the suite also
+    // drives this cycle under fake timers, where an unawaited filesystem walk never settles.
+    const dailySpend = apiKey ? await this.readDeepSeekDailySpend() : null
+    let fresh: ProviderRateLimits = credentialError
+      ? {
+          ...deepSeekBalanceFailure(credentialError, 'keychain-unavailable'),
+          dailySpend
+        }
+      : { ...(await fetchDeepSeekBalance(apiKey, signal)), dailySpend }
     if (
       signal?.aborted ||
       generation !== this.deepseekGeneration ||
@@ -133,7 +163,13 @@ export abstract class RateLimitServiceDeepSeekBalance extends RateLimitServiceFe
       this.updateState({ ...this.state, deepseek: null })
     } else {
       this.trackActiveFailureStreak('deepseek', fresh)
-      this.updateState({ ...this.state, deepseek: this.applyStalePolicy(fresh, previous) })
+      const settled = this.applyStalePolicy(fresh, previous)
+      // Why: the stale policy keeps a recent balance through transient failures, but today's
+      // spend is local bookkeeping and must not ride that cache across a day boundary.
+      this.updateState({
+        ...this.state,
+        deepseek: { ...settled, dailySpend: fresh.dailySpend ?? settled.dailySpend ?? null }
+      })
     }
     return this.getState()
   }

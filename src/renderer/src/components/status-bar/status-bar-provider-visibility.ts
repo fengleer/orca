@@ -50,6 +50,8 @@ function hasUsageData(provider: ProviderRateLimits): boolean {
     provider.fableWeekly ||
     provider.monthly ||
     provider.balance ||
+    // Why: today's spend is a local measurement, so it stays reportable while the balance API is down.
+    provider.dailySpend ||
     (provider.buckets && provider.buckets.length > 0)
   )
 }

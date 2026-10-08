@@ -1,4 +1,4 @@
-import type { DeepSeekAccountStatus, DeepSeekBalance } from './deepseek-balance'
+import type { DeepSeekAccountStatus, DeepSeekBalance, DeepSeekDailySpend } from './deepseek-balance'
 
 export type RateLimitWindow = {
   /** Percentage of the window consumed (0–100). */
@@ -64,6 +64,8 @@ export type ProviderRateLimits = {
     | 'deepseek'
   /** Prepaid monetary balances, without an inferred quota window. */
   balance?: DeepSeekBalance | null
+  /** Today's spend, reconstructed from the local harness logs (no provider API exists). */
+  dailySpend?: DeepSeekDailySpend | null
   /** 5-hour session window, null if not available. */
   session: RateLimitWindow | null
   /** 7-day weekly window, null if not available. */

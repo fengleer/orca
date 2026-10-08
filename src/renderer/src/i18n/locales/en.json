@@ -18877,6 +18877,16 @@
       "pending": "Balance unavailable",
       "updated": "Updated {{when}}"
     },
+    "spend": {
+      "todayInline": "Today {{amount}}",
+      "cost": "Today's cost",
+      "requests": "Requests",
+      "cacheMiss": "Cache miss tokens",
+      "cacheHit": "Cache hit tokens",
+      "output": "Output tokens",
+      "budget": "Daily budget",
+      "source": "Computed from local DSH session logs; DeepSeek has no usage API."
+    },
     "name": "DeepSeek",
     "search": {
       "name": "deepseek",
